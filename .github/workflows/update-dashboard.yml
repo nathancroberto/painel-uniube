@@ -1,0 +1,39 @@
+name: Atualizar painel UNIUBE
+
+on:
+  schedule:
+    # Todo dia às 08:00 (horário de Brasília = 11:00 UTC)
+    - cron: "0 11 * * *"
+  workflow_dispatch: {} # permite clicar em "Run workflow" para atualizar na hora
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Gerar painel a partir do ClickUp
+        env:
+          CLICKUP_API_TOKEN: ${{ secrets.CLICKUP_API_TOKEN }}
+        run: node scripts/build-dashboard.mjs
+
+      - name: Publicar mudanças (se houver)
+        run: |
+          git config user.name "painel-uniube-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add index.html
+          if git diff --cached --quiet; then
+            echo "Nada mudou desde a última atualização."
+          else
+            git commit -m "Atualiza painel UNIUBE a partir do ClickUp"
+            git push
+          fi
