@@ -18,6 +18,8 @@
     --series-1:       #2a78d6;
     --st-todo:        #898781;
     --st-doing:       #2a78d6;
+    --st-waiting:     #9a6700;
+    --st-review:      #4a3aa7;
     --st-blocked:     #d03b3b;
     --st-done:        #0ca30c;
     --card-shadow:    0 1px 2px rgba(11,11,11,0.05);
@@ -36,6 +38,8 @@
       --series-1:       #3987e5;
       --st-todo:        #898781;
       --st-doing:       #3987e5;
+      --st-waiting:     #fab219;
+      --st-review:      #9085e9;
       --st-blocked:     #e66767;
       --st-done:        #0ca30c;
       --card-shadow:    0 1px 2px rgba(0,0,0,0.3);
@@ -54,6 +58,8 @@
     --series-1:       #3987e5;
     --st-todo:        #898781;
     --st-doing:       #3987e5;
+    --st-waiting:     #fab219;
+    --st-review:      #9085e9;
     --st-blocked:     #e66767;
     --st-done:        #0ca30c;
     --card-shadow:    0 1px 2px rgba(0,0,0,0.3);
@@ -153,6 +159,31 @@
   .status-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; }
 
   .hidden { display: none !important; }
+
+  .card { cursor: pointer; }
+  .card:hover { border-color: var(--card-color); }
+  table.tview tbody tr { cursor: pointer; }
+  table.tview tbody tr:hover { background: var(--page-plane); }
+
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px; z-index: 100;
+  }
+  .modal {
+    position: relative; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 14px; padding: 28px; max-width: 560px; width: 100%;
+    max-height: 85vh; overflow-y: auto; box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  }
+  .modal h2 { font-size: 18px; margin: 6px 0 8px; }
+  .modal .meta { margin-bottom: 14px; }
+  .modal p { font-size: 14px; color: var(--text-secondary); line-height: 1.55; white-space: pre-wrap; }
+  .modal-close {
+    position: absolute; top: 14px; right: 14px; background: none; border: none;
+    color: var(--text-muted); font-size: 16px; cursor: pointer; line-height: 1;
+    padding: 4px;
+  }
+  .modal-close:hover { color: var(--text-primary); }
   footer { margin-top: 30px; color: var(--text-muted); font-size: 11.5px; }
 </style>
 </head>
@@ -183,8 +214,9 @@
   <div class="filters">
     <input class="search" id="search" type="text" placeholder="Buscar por nome ou descrição da demanda...">
     <button class="pill active" data-filter="all">Todas</button>
-    <button class="pill" data-filter="todo">A Fazer</button>
     <button class="pill" data-filter="doing">Em Produção</button>
+    <button class="pill" data-filter="review">Em Revisão</button>
+    <button class="pill" data-filter="waiting">Aguardando Aprovação</button>
     <button class="pill" data-filter="blocked">Bloqueado</button>
     <button class="pill" data-filter="done">Concluído</button>
   </div>
@@ -195,6 +227,17 @@
   </thead><tbody id="tableBody"></tbody></table></div>
 
   <footer>Este painel mostra apenas as demandas da UNIUBE. Gerado automaticamente a partir do ClickUp da Somos Young.</footer>
+</div>
+
+<div id="modalBackdrop" class="modal-backdrop hidden">
+  <div class="modal" role="dialog" aria-modal="true">
+    <button class="modal-close" id="modalClose" aria-label="Fechar">✕</button>
+    <div class="badge" id="modalBadge"></div>
+    <h2 id="modalTitle"></h2>
+    <div class="meta" id="modalMeta"></div>
+    <p id="modalDescription"></p>
+    <div class="files" id="modalFiles"></div>
+  </div>
 </div>
 
 <script>
@@ -217,13 +260,47 @@ function fileLabel(links, i) {
 function cardHtml(t) {
   const meta = STATUS_META[t.bucket];
   const files = t.drive_links.map((l,i) => `<a class="file-btn" href="${l}" target="_blank" rel="noopener">📁 ${fileLabel(t.drive_links,i)}</a>`).join('');
-  return `<div class="card" data-bucket="${t.bucket}" style="--card-color:${meta.color}">
+  return `<div class="card" data-bucket="${t.bucket}" data-task-id="${t.id}" style="--card-color:${meta.color}">
     <div class="badge">${meta.icon} ${meta.label}</div>
     <h3>${t.name}</h3>
     <div class="meta">Criado em ${fmtDate(t.date_created)}</div>
     <p>${t.summary}</p>
     ${files ? `<div class="files">${files}</div>` : ''}
   </div>`;
+}
+
+function openTaskModal(taskId) {
+  const t = TASKS.find(x => x.id === taskId);
+  if (!t) return;
+  const meta = STATUS_META[t.bucket];
+  document.getElementById('modalBadge').innerHTML = `${meta.icon} ${meta.label}`;
+  document.getElementById('modalBadge').style.color = meta.color;
+  document.getElementById('modalTitle').textContent = t.name;
+  document.getElementById('modalMeta').textContent = `Criado em ${fmtDate(t.date_created)}`;
+  document.getElementById('modalDescription').textContent = t.full_description || t.summary;
+  const files = t.drive_links.map((l,i) => `<a class="file-btn" href="${l}" target="_blank" rel="noopener">📁 ${fileLabel(t.drive_links,i)}</a>`).join('');
+  document.getElementById('modalFiles').innerHTML = files;
+  document.getElementById('modalBackdrop').classList.remove('hidden');
+}
+
+function closeTaskModal() {
+  document.getElementById('modalBackdrop').classList.add('hidden');
+}
+
+document.getElementById('modalClose').addEventListener('click', closeTaskModal);
+document.getElementById('modalBackdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'modalBackdrop') closeTaskModal();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeTaskModal();
+});
+
+function attachTaskClickHandler(container) {
+  container.addEventListener('click', (e) => {
+    if (e.target.closest('.file-btn')) return; // deixa o link do Drive funcionar normalmente
+    const row = e.target.closest('[data-task-id]');
+    if (row) openTaskModal(row.dataset.taskId);
+  });
 }
 
 function renderBoard(filter, query) {
@@ -253,7 +330,7 @@ function renderTable(filter, query) {
   body.innerHTML = items.map(t => {
     const meta = STATUS_META[t.bucket];
     const files = t.drive_links.map((l,i) => `<a class="file-btn" href="${l}" target="_blank" rel="noopener">📁 ${fileLabel(t.drive_links,i)}</a>`).join(' ');
-    return `<tr>
+    return `<tr data-task-id="${t.id}">
       <td>${t.name}</td>
       <td><span class="status-chip" style="color:${meta.color}">${meta.icon} ${meta.label}</span></td>
       <td class="desc">${t.summary}</td>
@@ -301,6 +378,8 @@ document.getElementById('toggleTheme').addEventListener('click', (e) => {
   else { root.setAttribute('data-theme','dark'); e.target.textContent = 'Modo claro'; }
 });
 
+attachTaskClickHandler(document.getElementById('boardView'));
+attachTaskClickHandler(document.getElementById('tableBody'));
 renderBoard(currentFilter, currentQuery);
 </script>
 </body>

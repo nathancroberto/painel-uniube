@@ -125,16 +125,19 @@ function stripEmojiAndMarkdown(text) {
     .trim();
 }
 
-function capLength(text) {
+function capLength(text, max) {
   let result = text.trim();
-  if (result.length > 320) {
-    result = result.slice(0, 320).replace(/\s+\S*$/, "") + "…";
+  if (result.length > max) {
+    result = result.slice(0, max).replace(/\s+\S*$/, "") + "…";
   }
   return result;
 }
 
+// Retorna { summary, full }: "summary" é o teaser curto mostrado no card,
+// "full" é o texto completo (já limpo de jargão interno) mostrado ao clicar
+// na tarefa — nunca o texto bruto do ClickUp.
 function cleanDescription(raw) {
-  if (!raw) return FALLBACK_TEXT;
+  if (!raw) return { summary: FALLBACK_TEXT, full: FALLBACK_TEXT };
   const text = stripEmojiAndMarkdown(raw);
   const lines = text
     .split("\n")
@@ -145,7 +148,8 @@ function cleanDescription(raw) {
     for (const re of OBJECTIVE_LABELS) {
       const m = line.match(re);
       if (m && m[1].trim().length > 8) {
-        return capLength(m[1].trim());
+        const clean = m[1].trim();
+        return { summary: capLength(clean, 220), full: capLength(clean, 4000) };
       }
     }
   }
@@ -153,9 +157,9 @@ function cleanDescription(raw) {
   const safeLines = lines.filter(
     (line) => !INTERNAL_LINE_PATTERNS.some((re) => re.test(line))
   );
-  const result = capLength(safeLines.join(" "));
-  if (result.length < 15) return FALLBACK_TEXT;
-  return result;
+  const joined = safeLines.join(" ").trim();
+  if (joined.length < 15) return { summary: FALLBACK_TEXT, full: FALLBACK_TEXT };
+  return { summary: capLength(joined, 220), full: capLength(joined, 4000) };
 }
 
 function cleanName(rawName) {
@@ -164,10 +168,22 @@ function cleanName(rawName) {
     .trim();
 }
 
+// "a fazer" entra junto de "em produção" de propósito: o cliente não deve ver
+// uma coluna vazia/"parado" só porque a peça ainda não começou a ser feita.
+// "em revisão" e "revisado" ganham coluna própria "Em Revisão" (etapa de
+// checagem interna, antes de ir pro cliente).
+// "aguardando cliente" ganha coluna própria "Aguardando Aprovação": é o único
+// status onde a próxima ação é do próprio cliente, então vale destacar.
+// "aprovado cliente" conta como concluído: se o cliente já aprovou, não sobra
+// nada pendente do lado dele.
 const STATUS_MAP = {
-  "a fazer": "todo",
+  "a fazer": "doing",
   "em produção": "doing",
+  "em revisão": "review",
+  revisado: "review",
   bloqueado: "blocked",
+  "aguardando cliente": "waiting",
+  "aprovado cliente": "done",
   concluído: "done",
   finalizado: "done",
 };
@@ -193,7 +209,9 @@ async function main() {
     }
     const commentTexts = comments.map((c) => c.comment_text || "");
     const driveLinks = extractDriveLinks(t.description || t.text_content || "", ...commentTexts);
-    const bucket = STATUS_MAP[(t.status?.status || "").toLowerCase()] || "todo";
+    const bucket = STATUS_MAP[(t.status?.status || "").toLowerCase()] || "doing";
+
+    const { summary, full } = cleanDescription(t.description || t.text_content || "");
 
     tasks.push({
       id: t.id,
@@ -201,7 +219,8 @@ async function main() {
       status: t.status?.status || "",
       bucket,
       date_created: Number(t.date_created),
-      summary: cleanDescription(t.description || t.text_content || ""),
+      summary,
+      full_description: full,
       drive_links: driveLinks,
     });
   }
@@ -212,12 +231,13 @@ async function main() {
 
 function renderHtml(tasks) {
   const STATUS_META = {
-    todo: { label: "A Fazer", color: "var(--st-todo)", icon: "○" },
     doing: { label: "Em Produção", color: "var(--st-doing)", icon: "◐" },
+    review: { label: "Em Revisão", color: "var(--st-review)", icon: "🔍" },
+    waiting: { label: "Aguardando Aprovação", color: "var(--st-waiting)", icon: "⏳" },
     blocked: { label: "Bloqueado", color: "var(--st-blocked)", icon: "⚠" },
     done: { label: "Concluído", color: "var(--st-done)", icon: "✓" },
   };
-  const COLUMN_ORDER = ["todo", "doing", "blocked", "done"];
+  const COLUMN_ORDER = ["doing", "review", "waiting", "blocked", "done"];
 
   const total = tasks.length;
   const done = tasks.filter((t) => t.bucket === "done").length;
