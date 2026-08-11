@@ -133,18 +133,28 @@ function capLength(text, max) {
   return result;
 }
 
-// Retorna { summary, full }: "summary" é o teaser curto mostrado no card,
-// "full" é o texto completo (já limpo de jargão interno) mostrado ao clicar
-// na tarefa — nunca o texto bruto do ClickUp.
+// Retorna { summary, full }: "summary" é o teaser curto (uma linha só, para o
+// card), "full" é o texto completo mostrado ao clicar na tarefa — já limpo de
+// jargão interno, mas preservando quebras de linha e marcadores de lista para
+// não virar um bloco único de texto. Nunca é o texto bruto do ClickUp.
 function cleanDescription(raw) {
   if (!raw) return { summary: FALLBACK_TEXT, full: FALLBACK_TEXT };
   const text = stripEmojiAndMarkdown(raw);
+
+  // Guarda se a linha era um item de lista (bullet ou numerada) antes de tirar
+  // o marcador, pra poder recolocar um "• " consistente no texto final.
   const lines = text
     .split("\n")
-    .map((l) => l.replace(/^[*\-•\d.\s]+/, "").trim())
-    .filter(Boolean);
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const isBullet = /^[*\-•]\s+/.test(l) || /^\d+[.)]\s+/.test(l);
+      const clean = l.replace(/^[*\-•]\s+/, "").replace(/^\d+[.)]\s+/, "").trim();
+      return { text: clean, isBullet };
+    })
+    .filter((l) => l.text.length > 0);
 
-  for (const line of lines) {
+  for (const { text: line } of lines) {
     for (const re of OBJECTIVE_LABELS) {
       const m = line.match(re);
       if (m && m[1].trim().length > 8) {
@@ -155,11 +165,34 @@ function cleanDescription(raw) {
   }
 
   const safeLines = lines.filter(
-    (line) => !INTERNAL_LINE_PATTERNS.some((re) => re.test(line))
+    ({ text: line }) => !INTERNAL_LINE_PATTERNS.some((re) => re.test(line))
   );
-  const joined = safeLines.join(" ").trim();
-  if (joined.length < 15) return { summary: FALLBACK_TEXT, full: FALLBACK_TEXT };
-  return { summary: capLength(joined, 220), full: capLength(joined, 4000) };
+
+  const summaryText = safeLines.map((l) => l.text).join(" ").trim();
+  if (summaryText.length < 15) return { summary: FALLBACK_TEXT, full: FALLBACK_TEXT };
+
+  // Junta parágrafos normais com linha em branco entre eles (fica mais
+  // arejado) e itens de lista com quebra simples, prefixados por "•".
+  const fullParts = [];
+  let bulletBuffer = [];
+  const flushBullets = () => {
+    if (bulletBuffer.length) {
+      fullParts.push(bulletBuffer.map((t) => `• ${t}`).join("\n"));
+      bulletBuffer = [];
+    }
+  };
+  for (const l of safeLines) {
+    if (l.isBullet) {
+      bulletBuffer.push(l.text);
+    } else {
+      flushBullets();
+      fullParts.push(l.text);
+    }
+  }
+  flushBullets();
+  const fullText = fullParts.join("\n\n").trim();
+
+  return { summary: capLength(summaryText, 220), full: capLength(fullText, 4000) };
 }
 
 function cleanName(rawName) {
