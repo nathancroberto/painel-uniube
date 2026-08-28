@@ -146,7 +146,8 @@
     display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600;
     color: var(--card-color); margin-bottom: 8px;
   }
-  .files { display: flex; flex-wrap: wrap; gap: 6px; }
+  .files { display: flex; flex-direction: column; gap: 8px; }
+  .file-item { display: flex; flex-direction: column; align-items: flex-start; }
   .file-btn {
     font-size: 11.5px; text-decoration: none; color: var(--series-1); border: 1px solid var(--border);
     border-radius: 6px; padding: 4px 9px; display: inline-flex; align-items: center; gap: 4px;
@@ -157,6 +158,10 @@
     font-weight: 600;
   }
   .file-btn.approve:hover { opacity: 0.88; }
+  .file-caption {
+    font-size: 11.5px; color: var(--text-muted); font-style: italic;
+    margin: 0 0 4px; line-height: 1.4;
+  }
 
   .empty-col { font-size: 12.5px; color: var(--text-muted); padding: 10px 4px; }
 
@@ -268,10 +273,21 @@ function fileLabel(links, i, bucket) {
   return links.length > 1 ? `Arquivo ${i+1}` : 'Abrir no Drive';
 }
 
+// Arquivos só aparecem quando fazem sentido pro cliente abrir: quando tem
+// algo esperando aprovação dele, ou quando a peça já foi concluída (fica
+// como referência do que foi entregue). Nas demais colunas (em produção, em
+// revisão, bloqueado) o material ainda não está pronto pra ser mostrado.
+const BUCKETS_WITH_FILES = new Set(['waiting', 'done']);
+
 function fileButtonsHtml(t, sep) {
+  if (!BUCKETS_WITH_FILES.has(t.bucket)) return '';
   const icon = t.bucket === 'waiting' ? '🔗' : '📁';
   const cls = t.bucket === 'waiting' ? 'file-btn approve' : 'file-btn';
-  return t.drive_links.map((l,i) => `<a class="${cls}" href="${l}" target="_blank" rel="noopener">${icon} ${fileLabel(t.drive_links,i,t.bucket)}</a>`).join(sep || '');
+  return t.drive_links.map((l,i) => {
+    const btn = `<a class="${cls}" href="${l.url}" target="_blank" rel="noopener">${icon} ${fileLabel(t.drive_links,i,t.bucket)}</a>`;
+    const caption = l.caption ? `<p class="file-caption">${l.caption}</p>` : '';
+    return `<div class="file-item">${caption}${btn}</div>`;
+  }).join(sep || '');
 }
 
 function cardHtml(t) {
