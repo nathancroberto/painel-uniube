@@ -247,8 +247,21 @@ async function main() {
     } catch (e) {
       console.error(`Falha ao buscar comentários de ${t.id}:`, e.message);
     }
-    const commentTexts = comments.map((c) => c.comment_text || "");
-    const driveLinks = extractDriveLinks(t.description || t.text_content || "", ...commentTexts);
+    // Quando alguém anexa um Google Doc/Sheet como card (em vez de colar a URL
+    // como texto puro), o ClickUp guarda o link dentro de um objeto de anexo
+    // na estrutura do comentário — e o "comment_text" vira só "undefined" +
+    // o texto que a pessoa digitou. Por isso escaneamos o comentário inteiro
+    // (serializado), não só o comment_text, atrás de qualquer link do Google.
+    const commentSources = [];
+    for (const c of comments) {
+      commentSources.push(c.comment_text || "");
+      try {
+        commentSources.push(JSON.stringify(c));
+      } catch {
+        // ignora comentário que não serializa (não deveria acontecer)
+      }
+    }
+    const driveLinks = extractDriveLinks(t.description || t.text_content || "", ...commentSources);
     const bucket = STATUS_MAP[(t.status?.status || "").toLowerCase()] || "doing";
 
     const { summary, full } = cleanDescription(t.description || t.text_content || "");
