@@ -56,18 +56,77 @@ async function getAllTasks() {
 // nenhum arquivo pra abrir.
 const DRIVE_RE = /(?:https?:\/\/)?(?:www\.)?(?:drive|docs)\.google\.com\/[^\s)\]"'<>]+/gi;
 
-function extractDriveLinks(...texts) {
-  const found = new Set();
-  for (const t of texts) {
-    if (!t) continue;
-    const matches = t.match(DRIVE_RE) || [];
-    for (let m of matches) {
-      m = m.replace(/[.,;:)\]]+$/, "");
-      if (!/^https?:\/\//i.test(m)) m = `https://${m}`;
-      found.add(m);
+function findDriveUrls(text) {
+  if (!text) return [];
+  const matches = text.match(DRIVE_RE) || [];
+  return matches.map((m) => {
+    m = m.replace(/[.,;:)\]]+$/, "");
+    if (!/^https?:\/\//i.test(m)) m = `https://${m}`;
+    return m;
+  });
+}
+
+// Nomes de pessoas mencionadas em comentários (ex.: "@Vinicius Diaz") — o
+// ClickUp sempre serializa menção como "@" + Nome Próprio, então detectamos
+// pelo padrão de capitalização, sem precisar de uma lista de nomes fixa.
+const MENTION_RE = /@\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*){0,3}/gu;
+
+// Constrói uma legenda curta e segura a partir do texto de um comentário —
+// a mesma orientação que a pessoa escreveu ao compartilhar o arquivo (ex.:
+// "Segue, últimos 3 cursos de Negócios..." ou "Os textos estão na aba
+// 'Parceiros'."), sem menções, sem o link em si, e sem nenhuma linha de
+// jargão interno de produção. Se não sobrar nada seguro, não tem legenda.
+function cleanCaption(raw) {
+  if (!raw) return null;
+  let text = raw.replace(/^undefined/, ""); // artefato do ClickUp quando o comentário é só um card anexado
+  text = stripEmojiAndMarkdown(text);
+  text = text.replace(MENTION_RE, "");
+  text = text.replace(DRIVE_RE, "");
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const safeLines = lines.filter(
+    (line) => !INTERNAL_LINE_PATTERNS.some((re) => re.test(line))
+  );
+  const joined = safeLines.join(" ").replace(/\s{2,}/g, " ").trim();
+  const cleaned = joined.replace(/^[:\-–—,\s]+/, "").replace(/^,+\s*/, "").trim();
+  if (cleaned.length < 4) return null;
+  return capLength(cleaned, 180);
+}
+
+// Retorna [{ url, caption }] combinando links da descrição (sem legenda) com
+// links encontrados nos comentários (com a orientação de quem compartilhou).
+// Também escaneia o comentário inteiro serializado, não só o comment_text:
+// quando alguém anexa um Google Doc/Sheet como card (embed) em vez de colar
+// a URL como texto puro, o link fica dentro do objeto de anexo — e o
+// comment_text vira só "undefined" + o texto que a pessoa digitou.
+function collectDriveLinks(descriptionText, comments) {
+  const linkMap = new Map(); // url -> caption (string | null)
+
+  for (const url of findDriveUrls(descriptionText)) {
+    if (!linkMap.has(url)) linkMap.set(url, null);
+  }
+
+  for (const c of comments) {
+    const rawText = c.comment_text || "";
+    let rawFull = "";
+    try {
+      rawFull = JSON.stringify(c);
+    } catch {
+      // ignora comentário que não serializa (não deveria acontecer)
+    }
+    const urls = new Set([...findDriveUrls(rawText), ...findDriveUrls(rawFull)]);
+    if (urls.size === 0) continue;
+    const caption = cleanCaption(rawText);
+    for (const url of urls) {
+      if (!linkMap.has(url) || !linkMap.get(url)) {
+        linkMap.set(url, caption);
+      }
     }
   }
-  return [...found];
+
+  return [...linkMap.entries()].map(([url, caption]) => ({ url, caption }));
 }
 
 // Linhas que batem com qualquer um desses padrões são descartadas (não cortamos
@@ -247,21 +306,7 @@ async function main() {
     } catch (e) {
       console.error(`Falha ao buscar comentários de ${t.id}:`, e.message);
     }
-    // Quando alguém anexa um Google Doc/Sheet como card (em vez de colar a URL
-    // como texto puro), o ClickUp guarda o link dentro de um objeto de anexo
-    // na estrutura do comentário — e o "comment_text" vira só "undefined" +
-    // o texto que a pessoa digitou. Por isso escaneamos o comentário inteiro
-    // (serializado), não só o comment_text, atrás de qualquer link do Google.
-    const commentSources = [];
-    for (const c of comments) {
-      commentSources.push(c.comment_text || "");
-      try {
-        commentSources.push(JSON.stringify(c));
-      } catch {
-        // ignora comentário que não serializa (não deveria acontecer)
-      }
-    }
-    const driveLinks = extractDriveLinks(t.description || t.text_content || "", ...commentSources);
+    const driveLinks = collectDriveLinks(t.description || t.text_content || "", comments);
     const bucket = STATUS_MAP[(t.status?.status || "").toLowerCase()] || "doing";
 
     const { summary, full } = cleanDescription(t.description || t.text_content || "");
