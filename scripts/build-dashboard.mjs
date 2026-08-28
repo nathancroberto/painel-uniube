@@ -66,10 +66,61 @@ function findDriveUrls(text) {
   });
 }
 
-// Nomes de pessoas mencionadas em comentários (ex.: "@Vinicius Diaz") — o
-// ClickUp sempre serializa menção como "@" + Nome Próprio, então detectamos
-// pelo padrão de capitalização, sem precisar de uma lista de nomes fixa.
-const MENTION_RE = /@\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*){0,3}/gu;
+// Equipe da agência (nomes do workspace do ClickUp) — usado pra remover
+// menções ("@Fulano de Tal") de forma exata. Uma correspondência exata evita
+// um bug sério: um padrão só baseado em maiúscula ("@Vinicius Diaz Segue...")
+// acabava engolindo a primeira palavra da frase seguinte também, porque ela
+// também começa com maiúscula.
+const KNOWN_TEAM_NAMES = [
+  "Matheus Monteiro Furbino e Souza",
+  "Marco Aurelio Pereira da Cunha",
+  "Ana Cláudia Novais dos Santos",
+  "Lucas Henrique de Matos Pereira",
+  "Yasmin Fernanda Lopes Santos",
+  "Amanda Silveira Lima Costa",
+  "Gustavo Domingues dos Santos",
+  "Kaio Pereira Onofre Viveiros",
+  "Aline Sayuri de Bastiani",
+  "Nathália Duarte Ballesteros",
+  "Jonathas Batista Leal",
+  "João Lucas Carvalho",
+  "Rafael José Michelon",
+  "Andriela Modinuti",
+  "Otavio Lopes",
+  "Patrick Bonnereau",
+  "Bruno Baccan",
+  "Andréa Silva Lima",
+  "Érika Gonçalves",
+  "Nathan Cardoso",
+  "Vinicius Diaz",
+  "Lucas Neres",
+  "Pedro Barreto",
+  "Helder Brito",
+  "Renã Pedroso",
+  "Álvaro Fernando",
+  "Sara Carsalade",
+  "Vitor Augusto",
+  "Denis Medeiros",
+  "Bruno Trindade",
+  "Somos Young",
+  "Andriela",
+  "Tolky",
+].sort((a, b) => b.length - a.length);
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const KNOWN_MENTION_RE = new RegExp(
+  "@(?:" + KNOWN_TEAM_NAMES.map(escapeRegExp).join("|") + ")",
+  "gi"
+);
+
+// Rede de segurança pra quem não está na lista acima (alguém que saiu da
+// equipe ou entrou depois desta lista ser gerada): assume no máximo
+// "@Nome Sobrenome" (2 palavras), pra reduzir o risco de engolir a primeira
+// palavra maiúscula da frase seguinte.
+const FALLBACK_MENTION_RE = /@\p{Lu}[\p{L}'’-]*(?:\s+\p{Lu}[\p{L}'’-]*)?/gu;
 
 // Constrói uma legenda curta e segura a partir do texto de um comentário —
 // a mesma orientação que a pessoa escreveu ao compartilhar o arquivo (ex.:
@@ -80,7 +131,8 @@ function cleanCaption(raw) {
   if (!raw) return null;
   let text = raw.replace(/^undefined/, ""); // artefato do ClickUp quando o comentário é só um card anexado
   text = stripEmojiAndMarkdown(text);
-  text = text.replace(MENTION_RE, "");
+  text = text.replace(KNOWN_MENTION_RE, "");
+  text = text.replace(FALLBACK_MENTION_RE, "");
   text = text.replace(DRIVE_RE, "");
   const lines = text
     .split("\n")
@@ -90,17 +142,30 @@ function cleanCaption(raw) {
     (line) => !INTERNAL_LINE_PATTERNS.some((re) => re.test(line))
   );
   const joined = safeLines.join(" ").replace(/\s{2,}/g, " ").trim();
-  const cleaned = joined.replace(/^[:\-–—,\s]+/, "").replace(/^,+\s*/, "").trim();
+  const cleaned = joined
+    .replace(/^[:\-–—,\s]+/, "")
+    .replace(/[:\-–—,\s]+$/, "")
+    .trim();
   if (cleaned.length < 4) return null;
   return capLength(cleaned, 180);
 }
 
+// Legenda só faz sentido pra link de Doc/Sheet/Slide/Form (docs.google.com):
+// nesse caso o nome do arquivo sozinho não diz muito, então a orientação de
+// quem compartilhou ajuda o cliente a entender o que vai encontrar lá. Já um
+// link de pasta/arquivo do Drive já é auto-explicativo (o cliente abre e vê
+// o material) — não precisa de legenda.
+function isDocsLink(url) {
+  return /^https?:\/\/(www\.)?docs\.google\.com/i.test(url);
+}
+
 // Retorna [{ url, caption }] combinando links da descrição (sem legenda) com
-// links encontrados nos comentários (com a orientação de quem compartilhou).
-// Também escaneia o comentário inteiro serializado, não só o comment_text:
-// quando alguém anexa um Google Doc/Sheet como card (embed) em vez de colar
-// a URL como texto puro, o link fica dentro do objeto de anexo — e o
-// comment_text vira só "undefined" + o texto que a pessoa digitou.
+// links encontrados nos comentários (com a orientação de quem compartilhou,
+// só para links de Docs/Sheets). Também escaneia o comentário inteiro
+// serializado, não só o comment_text: quando alguém anexa um Google Doc/Sheet
+// como card (embed) em vez de colar a URL como texto puro, o link fica
+// dentro do objeto de anexo — e o comment_text vira só "undefined" + o texto
+// que a pessoa digitou.
 function collectDriveLinks(descriptionText, comments) {
   const linkMap = new Map(); // url -> caption (string | null)
 
@@ -120,8 +185,9 @@ function collectDriveLinks(descriptionText, comments) {
     if (urls.size === 0) continue;
     const caption = cleanCaption(rawText);
     for (const url of urls) {
+      const captionForUrl = isDocsLink(url) ? caption : null;
       if (!linkMap.has(url) || !linkMap.get(url)) {
-        linkMap.set(url, caption);
+        linkMap.set(url, captionForUrl);
       }
     }
   }
