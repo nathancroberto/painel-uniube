@@ -48,7 +48,11 @@ async function getAllTasks() {
   return all;
 }
 
-const DRIVE_RE = /https?:\/\/(?:www\.)?drive\.google\.com\/[^\s)\]"'<>]+/gi;
+// O time costuma colar o link do Drive nos comentários sem o "https://" na
+// frente (ex.: "drive.google.com/drive/folders/..."), então o protocolo é
+// opcional aqui — sem isso, esses links ficavam de fora e o card do cliente
+// aparecia sem nenhum arquivo pra abrir.
+const DRIVE_RE = /(?:https?:\/\/)?(?:www\.)?drive\.google\.com\/[^\s)\]"'<>]+/gi;
 
 function extractDriveLinks(...texts) {
   const found = new Set();
@@ -57,6 +61,7 @@ function extractDriveLinks(...texts) {
     const matches = t.match(DRIVE_RE) || [];
     for (let m of matches) {
       m = m.replace(/[.,;:)\]]+$/, "");
+      if (!/^https?:\/\//i.test(m)) m = `https://${m}`;
       found.add(m);
     }
   }
