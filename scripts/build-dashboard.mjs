@@ -48,11 +48,13 @@ async function getAllTasks() {
   return all;
 }
 
-// O time costuma colar o link do Drive nos comentários sem o "https://" na
-// frente (ex.: "drive.google.com/drive/folders/..."), então o protocolo é
-// opcional aqui — sem isso, esses links ficavam de fora e o card do cliente
-// aparecia sem nenhum arquivo pra abrir.
-const DRIVE_RE = /(?:https?:\/\/)?(?:www\.)?drive\.google\.com\/[^\s)\]"'<>]+/gi;
+// Pega links de Drive (pastas/arquivos) e também de Docs/Sheets/Slides/Forms,
+// que no Google ficam todos sob o domínio docs.google.com. O time também
+// costuma colar o link nos comentários sem o "https://" na frente (ex.:
+// "drive.google.com/drive/folders/..."), então o protocolo é opcional aqui —
+// sem isso, esses links ficavam de fora e o card do cliente aparecia sem
+// nenhum arquivo pra abrir.
+const DRIVE_RE = /(?:https?:\/\/)?(?:www\.)?(?:drive|docs)\.google\.com\/[^\s)\]"'<>]+/gi;
 
 function extractDriveLinks(...texts) {
   const found = new Set();
@@ -105,7 +107,7 @@ const INTERNAL_LINE_PATTERNS = [
   /diferencia[çc][ãa]o de modalidade/i,
   /ancoragem local/i,
   /^https?:\/\//i,
-  /^drive\.google\.com/i,
+  /^(drive|docs)\.google\.com/i,
 ];
 
 // Quando existir uma linha "Objetivo Estratégico:" ou "Objetivo:", usamos
