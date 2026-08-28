@@ -19,6 +19,7 @@
     --st-todo:        #898781;
     --st-doing:       #2a78d6;
     --st-waiting:     #9a6700;
+    --on-waiting:     #ffffff;
     --st-review:      #4a3aa7;
     --st-blocked:     #d03b3b;
     --st-done:        #0ca30c;
@@ -39,6 +40,7 @@
       --st-todo:        #898781;
       --st-doing:       #3987e5;
       --st-waiting:     #fab219;
+      --on-waiting:     #1a1200;
       --st-review:      #9085e9;
       --st-blocked:     #e66767;
       --st-done:        #0ca30c;
@@ -59,6 +61,7 @@
     --st-todo:        #898781;
     --st-doing:       #3987e5;
     --st-waiting:     #fab219;
+    --on-waiting:     #1a1200;
     --st-review:      #9085e9;
     --st-blocked:     #e66767;
     --st-done:        #0ca30c;
@@ -149,6 +152,11 @@
     border-radius: 6px; padding: 4px 9px; display: inline-flex; align-items: center; gap: 4px;
   }
   .file-btn:hover { border-color: var(--series-1); }
+  .file-btn.approve {
+    color: var(--on-waiting); background: var(--st-waiting); border-color: var(--st-waiting);
+    font-weight: 600;
+  }
+  .file-btn.approve:hover { opacity: 0.88; }
 
   .empty-col { font-size: 12.5px; color: var(--text-muted); padding: 10px 4px; }
 
@@ -253,13 +261,22 @@ function fmtDate(ms) {
   return `${dd}/${mm}/${yy}`;
 }
 
-function fileLabel(links, i) {
+function fileLabel(links, i, bucket) {
+  if (bucket === 'waiting') {
+    return links.length > 1 ? `Aprovar arquivo ${i+1}` : 'Abrir para aprovar';
+  }
   return links.length > 1 ? `Arquivo ${i+1}` : 'Abrir no Drive';
+}
+
+function fileButtonsHtml(t, sep) {
+  const icon = t.bucket === 'waiting' ? '🔗' : '📁';
+  const cls = t.bucket === 'waiting' ? 'file-btn approve' : 'file-btn';
+  return t.drive_links.map((l,i) => `<a class="${cls}" href="${l}" target="_blank" rel="noopener">${icon} ${fileLabel(t.drive_links,i,t.bucket)}</a>`).join(sep || '');
 }
 
 function cardHtml(t) {
   const meta = STATUS_META[t.bucket];
-  const files = t.drive_links.map((l,i) => `<a class="file-btn" href="${l}" target="_blank" rel="noopener">📁 ${fileLabel(t.drive_links,i)}</a>`).join('');
+  const files = fileButtonsHtml(t);
   return `<div class="card" data-bucket="${t.bucket}" data-task-id="${t.id}" style="--card-color:${meta.color}">
     <div class="badge">${meta.icon} ${meta.label}</div>
     <h3>${t.name}</h3>
@@ -278,7 +295,7 @@ function openTaskModal(taskId) {
   document.getElementById('modalTitle').textContent = t.name;
   document.getElementById('modalMeta').textContent = `Criado em ${fmtDate(t.date_created)}`;
   document.getElementById('modalDescription').textContent = t.full_description || t.summary;
-  const files = t.drive_links.map((l,i) => `<a class="file-btn" href="${l}" target="_blank" rel="noopener">📁 ${fileLabel(t.drive_links,i)}</a>`).join('');
+  const files = fileButtonsHtml(t);
   document.getElementById('modalFiles').innerHTML = files;
   document.getElementById('modalBackdrop').classList.remove('hidden');
 }
@@ -329,7 +346,7 @@ function renderTable(filter, query) {
   if (query) items = items.filter(t => (t.name+' '+t.summary).toLowerCase().includes(query));
   body.innerHTML = items.map(t => {
     const meta = STATUS_META[t.bucket];
-    const files = t.drive_links.map((l,i) => `<a class="file-btn" href="${l}" target="_blank" rel="noopener">📁 ${fileLabel(t.drive_links,i)}</a>`).join(' ');
+    const files = fileButtonsHtml(t, ' ');
     return `<tr data-task-id="${t.id}">
       <td>${t.name}</td>
       <td><span class="status-chip" style="color:${meta.color}">${meta.icon} ${meta.label}</span></td>
